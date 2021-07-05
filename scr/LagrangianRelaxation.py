@@ -4,15 +4,18 @@ import numpy as np
 import os
 
 class LagrangianRelaxation:
-    def __init__(self, model, relaxed_constrs, n_relaxed, mulpier):
-        assert(mulpier.size == n_relaxed)
+    def __init__(self, model, relaxed_constrs, mulpier):
         self.orig_model, self.mulpier = model.copy(), mulpier
         self.relaxed_ind, self.n_relaxed = self.__get_relaxed_constrs(relaxed_constrs)
-        self.relaxed_prob = self.RelaxedProb(model, self.relaxed_ind, self.n_relaxed)
-        relaxed_expr = self.relaxed_prob.get_relaxed_expr()
-        sense = self.relaxed_prob.get_sense()
-        self.dual_prob = self.DualProb(mulpier, sense)
-
+        assert(mulpier.size == self.n_relaxed)
+        assert(len(self.relaxed_ind) == self.n_relaxed)
+    
+    def bulid_relaxed_duality(self, lagrangian_relaxation):
+        self.relaxed_prob = self.RelaxedProb(lagrangian_relaxation)
+        self.relaxed_expr = self.relaxed_prob.get_relaxed_expr()
+        self.sense = self.relaxed_prob.get_sense()
+        self.duality_prob = self.DualityProb(lagrangian_relaxation)
+        
     def __get_relaxed_constrs(self, relaxed_constrs):
         relaxed_constrs_ind = []
         for constr_item in relaxed_constrs:
@@ -25,29 +28,27 @@ class LagrangianRelaxation:
                 print("input constraints type error")
         return relaxed_constrs_ind, len(relaxed_constrs_ind)
     
-    def step(self, k):
-        self.relaxed_prob.reset_relaxed_objective(self.mulpier)
-        self.relaxed_prob.optimize()
-        self.x = self.relaxed_prob.get_solution()
-        self.relaxed_expr = self.relaxed_prob.get_relaxed_expr()
-        self.relaxed_obj_values = self.relaxed_prob.get_objective_values()
-        self.relaxed_prob.write_model(k)
-
-        self.subgradients = self.dual_prob.get_subgradients(self.relaxed_expr)
-        self.dual_prob.get_step_size(self.relaxed_obj_values)
-        self.mulpier = self.dual_prob.update_mulpier()
-        self.print_status()
+    def is_feasible(self):
+        self.relaxed_expr_value = np.array([x.getValue() for x in self.relaxed_prob.get_relaxed_expr()])
+        if (self.relaxed_expr_value[self.relaxed_prob.get_sense() <= '<'] < 0).all():
+            print("relaxed problem has obtained feasible solution")
+            return True
+        else:
+            return False
+    
+    def get_gap(self):
+        self.gap = (self.duality_prob.best_ub - self.relaxed_prob.get_objective_values()) / self.duality_prob.best_ub
+        return self.gap
     
     def print_status(self):
-        print("subgradients: ", self.subgradients)
-        print("mulpier: ", self.mulpier)
-        print("relaxed obj values: ", self.relaxed_obj_values)
-
+        print("subgradients: ", self.duality_prob.subgradients)
+        print("mulpier: ", self.duality_prob.mulpier)
+        print("relaxed obj values: ", self.relaxed_prob.objective_values)
+        print("MIP Gap: " + "{:.5f}".format(100 * self.get_gap()) + "%")
 
     class RelaxedProb:
-        def __init__(self, model, relaxed_ind, n_relaxed):
-            assert(len(relaxed_ind) == n_relaxed)
-            self.model, self.relaxed_ind, self.n_relaxed = model.copy(), relaxed_ind, n_relaxed
+        def __init__(self, lagrangian_relaxation):
+            self.model, self.relaxed_ind, self.n_relaxed = lagrangian_relaxation.orig_model.copy(), lagrangian_relaxation.relaxed_ind, lagrangian_relaxation.n_relaxed
             self.constrs_matrix, self.rhs, self.sense = self.__get_constrs_matrix(), self.__get_constrs_rhs(), self.__get_constrs_sense()
             self.relaxed_expr = self.__get_relaxed_expr()
             self.__remove_relaxed_constrs()
@@ -61,7 +62,7 @@ class LagrangianRelaxation:
             return np.array(rhs)
         
         def __get_constrs_sense(self):
-            sense = [self.model.getConstrs()[constrs_ind].getAttr('Sense') for constrs_ind in self.relaxed_ind]
+            sense = np.array([self.model.getConstrs()[constrs_ind].getAttr('Sense') for constrs_ind in self.relaxed_ind])
             return sense
         
         def __get_relaxed_expr(self):
@@ -113,38 +114,82 @@ class LagrangianRelaxation:
             self.route = os.getcwd() + '\\results\\'
             self.model.write(self.route + 'GAPModel' + str(k) + '.lp')
     
-    class DualProb:
-        def __init__(self, mulpier, sense):
-            self.mulpier, self.sense = mulpier, sense
-            self.best_ub = self.__estimate_best_ub()
+    class DualityProb:
+        def __init__(self, lagrangian_relaxation):
+            self.mulpier, self.sense = lagrangian_relaxation.mulpier, lagrangian_relaxation.sense
         
         def get_subgradients(self, relaxed_expr):
             self.subgradients = np.array([relaxed_expr[i].getValue() for i in range(len(relaxed_expr))])
             return self.subgradients   
         
-        def get_step_size(self, relaxed_obj_values):
+        def get_step_size(self, k, relaxed_obj_values, heuristic_solver):
+            if k == 0:
+                self.best_ub = self.__estimate_best_ub(heuristic_solver)
+
             self.relaxed_obj_values = relaxed_obj_values
             self.step_size = (self.best_ub - self.relaxed_obj_values) / (np.linalg.norm(self.subgradients))**2
-
+           
         def update_mulpier(self):
             self.mulpier += self.step_size * self.subgradients
             for i in range(self.mulpier.size):
                 if self.sense[i] == '<':
-                    self.mulpier[0, i] = min(0, self.mulpier[i])
+                    self.mulpier[0, i] = max(0, self.mulpier[0, i])
                 elif self.sense[i] == '>':
-                    self.mulpier[0, i] = max(0, self.mulpier[i])
+                    self.mulpier[0, i] = min(0, self.mulpier[0, i])
             return self.mulpier
 
-        def __estimate_best_ub(self):
-            best_ub = 1700
+        def __estimate_best_ub(self, heuristic_solver):
+            heuristic_solver.optimize()
+            best_ub = heuristic_solver.get_objective_values()
             return best_ub
 
-        #if iterTimes == 0:
-            #self.stepSize = (self.bestUpBound - self.relaxedObjValues) / (np.linalg.norm(self.subgradients))**2
-        #else:
-            #self.p = 1 - 1 / ((iterTimes + 1)**self.r)
-            #self.alpha = 1 - 1 / (self.m * (iterTimes + 1)**self.p)
-            #self.stepSize = self.alpha * self.stepSizeLast * np.linalg.norm(self.subgrdientsLast) / np.linalg.norm(self.subgradients)
+class SurrogateLagrangianRelaxation(LagrangianRelaxation):
+    def __init__(self, model, relaxed_constrs, mulpier, r, big_m):
+        super(SurrogateLagrangianRelaxation, self).__init__(model, relaxed_constrs, mulpier)
+        self.LagrangianRelaxation = LagrangianRelaxation
+        self.r, self.big_m = r, big_m
+        assert(self.r > 0 and self.r < 1)
+        assert(self.big_m >= 1)
     
+    class DualityProb:
+        def __init__(self, lagrangian_relaxation):
+            self.mulpier, self.sense = lagrangian_relaxation.mulpier, lagrangian_relaxation.sense
+            self.r, self.big_m = lagrangian_relaxation.r, lagrangian_relaxation.big_m
+        
+        def get_subgradients(self, relaxed_expr):
+            self.subgradients = np.array([relaxed_expr[i].getValue() for i in range(len(relaxed_expr))])
+            return self.subgradients   
+        
+        def get_step_size(self, k, relaxed_obj_values, heuristic_solver):
+            if k == 0:
+                self.best_ub = self.__estimate_best_ub(heuristic_solver)
+                self.relaxed_obj_values = relaxed_obj_values
+                self.step_size = (self.best_ub - self.relaxed_obj_values) / (np.linalg.norm(self.subgradients))**2
+            
+            else:
+                self.p = 1 - 1 / ((k + 1)**self.r)
+                self.alpha = 1 - 1 / (self.big_m * (k + 1)**self.p)
+                self.step_size = self.alpha * self.last_step_size * np.linalg.norm(self.last_subgradients) / np.linalg.norm(self.subgradients)
+            
+            self.last_step_size, self.last_subgradients = self.step_size, self.subgradients.copy()
+           
+        def update_mulpier(self):
+            self.mulpier += self.step_size * self.subgradients
+            for i in range(self.mulpier.size):
+                if self.sense[i] == '<':
+                    self.mulpier[0, i] = max(0, self.mulpier[0, i])
+                elif self.sense[i] == '>':
+                    self.mulpier[0, i] = min(0, self.mulpier[0, i])
+            return self.mulpier
 
+        def __estimate_best_ub(self, heuristic_solver):
+            heuristic_solver.optimize()
+            best_ub = heuristic_solver.get_objective_values()
+            return best_ub
+  
+        
+
+            
+    
+    
         
