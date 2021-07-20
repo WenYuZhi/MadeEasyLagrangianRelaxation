@@ -4,7 +4,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 
-class LagrangianRelaxation:
+class LagrangRelax:
     def __init__(self, model, relaxed_constrs, mulpier):
         self.orig_model, self.mulpier = model.copy(), mulpier
         self.relaxed_ind, self.n_relaxed = self.__get_relaxed_constrs(relaxed_constrs)
@@ -12,11 +12,11 @@ class LagrangianRelaxation:
         assert(mulpier.size == self.n_relaxed)
         assert(len(self.relaxed_ind) == self.n_relaxed)
     
-    def bulid_relaxed_duality(self, lagrangian_relaxation):
-        self.relaxed_prob = self.RelaxedProb(lagrangian_relaxation)
+    def bulid_relaxed_duality(self, lagrang_relax):
+        self.relaxed_prob = self.RelaxedProb(lagrang_relax)
         self.relaxed_expr = self.relaxed_prob.get_relaxed_expr()
         self.sense = self.relaxed_prob.get_sense()
-        self.duality_prob = self.DualityProb(lagrangian_relaxation)
+        self.duality_prob = self.DualityProb(lagrang_relax)
         
     def __get_relaxed_constrs(self, relaxed_constrs):
         relaxed_constrs_ind = []
@@ -47,7 +47,7 @@ class LagrangianRelaxation:
     
     def print_status(self, k):
         print("iteration time: ", k)
-        print("subgradients: ", self.duality_prob.subgradients)
+        print("subgrad: ", self.duality_prob.subgrad)
         print("mulpier: ", self.duality_prob.mulpier)
         print("relaxed obj values: ", self.relaxed_prob.objective_values)
         print("MIP Gap: " + "{:.5f}".format(self.get_gap()) + "%")
@@ -80,8 +80,8 @@ class LagrangianRelaxation:
 
 
     class RelaxedProb:
-        def __init__(self, lagrangian_relaxation):
-            self.model, self.relaxed_ind, self.n_relaxed = lagrangian_relaxation.orig_model.copy(), lagrangian_relaxation.relaxed_ind, lagrangian_relaxation.n_relaxed
+        def __init__(self, lagrang_relax):
+            self.model, self.relaxed_ind, self.n_relaxed = lagrang_relax.orig_model.copy(), lagrang_relax.relaxed_ind, lagrang_relax.n_relaxed
             self.constrs_matrix, self.rhs, self.sense = self.__get_constrs_matrix(), self.__get_constrs_rhs(), self.__get_constrs_sense()
             self.relaxed_expr = self.__get_relaxed_expr()
             self.__remove_relaxed_constrs()
@@ -148,25 +148,25 @@ class LagrangianRelaxation:
             self.model.write(self.route + 'GAPModel' + str(k) + '.lp')
     
     class DualityProb:
-        def __init__(self, lagrangian_relaxation):
-            self.mulpier, self.sense = lagrangian_relaxation.mulpier.copy(), lagrangian_relaxation.sense
-            self.orig_model_sense = lagrangian_relaxation.orig_model.getAttr("ModelSense")
+        def __init__(self, lagrang_relax):
+            self.mulpier, self.sense = lagrang_relax.mulpier.copy(), lagrang_relax.sense
+            self.orig_model_sense = lagrang_relax.orig_model.getAttr("ModelSense")
             self.sign_flag = self.step_size = 1.0 if self.orig_model_sense == 'Minimization' else -1.0
         
-        def get_subgradients(self, relaxed_expr):
-            self.subgradients = np.array([relaxed_expr[i].getValue() for i in range(len(relaxed_expr))])
-            return self.subgradients   
+        def get_subgrad(self, relaxed_expr):
+            self.subgrad = np.array([relaxed_expr[i].getValue() for i in range(len(relaxed_expr))])
+            return self.subgrad   
         
         def get_step_size(self, k, pho, relaxed_obj_values, heuristic_solver):
             if k == 0:
                 self.best_bound = self.__estimate_best_bound(heuristic_solver)
 
             self.relaxed_obj_values = relaxed_obj_values
-            self.step_size = pho * self.sign_flag * (self.best_bound - relaxed_obj_values) / (np.linalg.norm(self.subgradients))**2
-            print("subgradients norm: ", (np.linalg.norm(self.subgradients))**2)
+            self.step_size = pho * self.sign_flag * (self.best_bound - relaxed_obj_values) / (np.linalg.norm(self.subgrad))**2
+            print("subgrad norm: ", (np.linalg.norm(self.subgrad))**2)
 
         def update_mulpier(self):
-            self.mulpier += 0.01* self.sign_flag * self.step_size * self.subgradients
+            self.mulpier += 0.01* self.sign_flag * self.step_size * self.subgrad
             for i in range(self.mulpier.size):
                 if self.sense[i] == '<':
                     self.mulpier[0, i] = max(0, self.mulpier[0, i]) if self.sign_flag == 1.0 else min(0, self.mulpier[0, i])
@@ -179,40 +179,40 @@ class LagrangianRelaxation:
             best_bound = heuristic_solver.get_objective_values()
             return best_bound
 
-class SurrogateLagrangianRelaxation(LagrangianRelaxation):
+class SurrogateLagrangRelax(LagrangRelax):
     def __init__(self, model, relaxed_constrs, mulpier, r, big_m):
-        super(SurrogateLagrangianRelaxation, self).__init__(model, relaxed_constrs, mulpier)
-        self.LagrangianRelaxation = LagrangianRelaxation
+        super(SurrogateLagrangRelax, self).__init__(model, relaxed_constrs, mulpier)
+        self.LagrangRelax = LagrangRelax
         self.r, self.big_m = r, big_m
         assert(self.r > 0 and self.r < 1)
         assert(self.big_m >= 1)
     
     class DualityProb:
-        def __init__(self, lagrangian_relaxation):
-            self.mulpier, self.sense = lagrangian_relaxation.mulpier, lagrangian_relaxation.sense
-            self.orig_model_sense = lagrangian_relaxation.orig_model.getAttr("ModelSense")
+        def __init__(self, lagrang_relax):
+            self.mulpier, self.sense = lagrang_relax.mulpier, lagrang_relax.sense
+            self.orig_model_sense = lagrang_relax.orig_model.getAttr("ModelSense")
             self.sign_flag = self.step_size = 1.0 if self.orig_model_sense == 'Minimization' else -1.0
-            self.r, self.big_m = lagrangian_relaxation.r, lagrangian_relaxation.big_m
+            self.r, self.big_m = lagrang_relax.r, lagrang_relax.big_m
         
-        def get_subgradients(self, relaxed_expr):
-            self.subgradients = np.array([relaxed_expr[i].getValue() for i in range(len(relaxed_expr))])
-            return self.subgradients   
+        def get_subgrad(self, relaxed_expr):
+            self.subgrad = np.array([relaxed_expr[i].getValue() for i in range(len(relaxed_expr))])
+            return self.subgrad   
         
         def get_step_size(self, k, relaxed_obj_values, heuristic_solver):
             if k == 0:
                 self.best_bound = self.__estimate_best_bound(heuristic_solver)
                 self.relaxed_obj_values = relaxed_obj_values
-                self.step_size = self.sign_flag * (self.best_bound - self.relaxed_obj_values) / (np.linalg.norm(self.subgradients))**2
+                self.step_size = self.sign_flag * (self.best_bound - self.relaxed_obj_values) / (np.linalg.norm(self.subgrad))**2
             
             else:
                 self.p = 1 - 1 / ((k + 1)**self.r)
                 self.alpha = 1 - 1 / (self.big_m * (k + 1)**self.p)
-                self.step_size = self.alpha * self.last_step_size * np.linalg.norm(self.last_subgradients) / np.linalg.norm(self.subgradients)
+                self.step_size = self.alpha * self.last_step_size * np.linalg.norm(self.last_subgrad) / np.linalg.norm(self.subgrad)
             
-            self.last_step_size, self.last_subgradients = self.step_size, self.subgradients.copy()
+            self.last_step_size, self.last_subgrad = self.step_size, self.subgrad.copy()
            
         def update_mulpier(self):
-            self.mulpier += self.sign_flag * self.step_size * self.subgradients
+            self.mulpier += self.sign_flag * self.step_size * self.subgrad
             for i in range(self.mulpier.size):
                 if self.sense[i] == '<':
                     self.mulpier[0, i] = max(0, self.mulpier[0, i]) if self.sign_flag == 1.0 else min(0, self.mulpier[0, i])
@@ -225,9 +225,47 @@ class SurrogateLagrangianRelaxation(LagrangianRelaxation):
             best_bound = heuristic_solver.get_objective_values()
             return best_bound
   
-        
-
             
+class LevelLagrangRelax(LagrangRelax):
+    def __init__(self, model, relaxed_constrs, mulpier, sigma, delta, R):
+        super(LevelLagrangRelax, self).__init__(model, relaxed_constrs, mulpier)
+        self.LagrangRelax = LagrangRelax
+        self.sigma, self.delta, self.R = sigma, delta, R
+        assert(self.sigma > 0 and self.delta < 1 and self.R > 0)
     
+    class DualityProb:
+        def __init__(self, lagrang_relax):
+            self.mulpier, self.sense = lagrang_relax.mulpier, lagrang_relax.sense
+            self.orig_model_sense = lagrang_relax.orig_model.getAttr("ModelSense")
+            self.sign_flag = self.step_size = 1.0 if self.orig_model_sense == 'Minimization' else -1.0
+            self.delta, self.R = lagrang_relax.delta, lagrang_relax.R
+            self.L, self.K = 1, [1]
+        
+        def get_subgrad(self, relaxed_expr):
+            self.subgrad = np.array([relaxed_expr[i].getValue() for i in range(len(relaxed_expr))])
+            return self.subgrad   
+        
+        def get_step_size(self, k, relaxed_obj_values, heuristic_solver):
+            if k == 0:
+                self.best_obj_values, self.sigma = np.inf, 0
+            self.relaxed_obj_values = relaxed_obj_values
+           
+        def update_mulpier(self):
+            self.mulpier += self.sign_flag * self.step_size * self.subgrad
+            for i in range(self.mulpier.size):
+                if self.sense[i] == '<':
+                    self.mulpier[0, i] = max(0, self.mulpier[0, i]) if self.sign_flag == 1.0 else min(0, self.mulpier[0, i])
+                elif self.sense[i] == '>':
+                    self.mulpier[0, i] = min(0, self.mulpier[0, i]) if self.sign_flag == 1.0 else max(0, self.mulpier[0, i])
+            return self.mulpier
+
+        def __evaluate_objective(self):
+            if self.relaxed_obj_values < self.best_obj_values:
+                self.best_obj_values  = self.relaxed_obj_values 
+        
+        def __is_descent(self):
+            if self.relaxed_obj_values <= self.best_obj_values - 0.5 * self.delta:
+                self.K[self.L] = 0
+
     
         
