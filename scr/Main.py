@@ -30,17 +30,17 @@ model.write('model.lp')
 
 # input original model, relaxed constrs and initialization muliper
 relaxed_constrs, n_relaxed = [constrs1], n_agent
-mulpier = np.zeros((1, n_relaxed))
-heuristic_solver = HeuristicBySolver(model, gap = 0.0, time_limit = 300)
+mulpier = -0.02 * np.zeros((1, n_relaxed))
+heuristic_solver = HeuristicBySolver(model, gap = 0.01, time_limit = 300)
 
 # SurrogateLagrangianRelaxation 表示代理拉格朗日松弛法, LagrangianRelaxation 表示普通拉格朗日松弛法
-# lagrangian_relaxation = LagrangianRelaxation(model, relaxed_constrs, mulpier)
-# lagrangian_relaxation.bulid_relaxed_duality(lagrangian_relaxation)
-
-lagrangian_relaxation = SurrogateLagrangianRelaxation(model, relaxed_constrs, mulpier, r = 0.3, big_m = 1.2)
+lagrangian_relaxation = LagrangianRelaxation(model, relaxed_constrs, mulpier)
 lagrangian_relaxation.bulid_relaxed_duality(lagrangian_relaxation)
 
-max_iter_times = 50
+#lagrangian_relaxation = SurrogateLagrangianRelaxation(model, relaxed_constrs, mulpier, r = 0.8, big_m = 1.2)
+#lagrangian_relaxation.bulid_relaxed_duality(lagrangian_relaxation)
+
+max_iter_times = 30
 
 for k in range(max_iter_times):
     lagrangian_relaxation.relaxed_prob.reset_relaxed_objective(mulpier)   # 更新松弛问题目标函数
@@ -53,7 +53,7 @@ for k in range(max_iter_times):
         break
 
     subgradients = lagrangian_relaxation.duality_prob.get_subgradients(relaxed_expr)  # 计算次梯度
-    lagrangian_relaxation.duality_prob.get_step_size(k, relaxed_obj_values, heuristic_solver)   # 计算次梯度步长
+    lagrangian_relaxation.duality_prob.get_step_size(k, 0.8, relaxed_obj_values, heuristic_solver)   # 计算次梯度步长
     mulpier = lagrangian_relaxation.duality_prob.update_mulpier()                     # 更新乘子
 
     lagrangian_relaxation.print_status(k)  
