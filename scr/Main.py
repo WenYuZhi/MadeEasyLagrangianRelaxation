@@ -5,6 +5,7 @@ import pandas as pd
 from ORLibaryDataSet import ORLibaryDataSet
 from LagrangianRelaxation import LagrangRelax
 from LagrangianRelaxation import SurrogateLagrangRelax
+from LagrangianRelaxation import LevLagrangRelax
 from Heuristic import HeuristicBySolver
 
 data_set = ORLibaryDataSet('GenAssignProblem')
@@ -33,14 +34,15 @@ relaxed_constrs, n_relaxed = [constrs1], n_agent
 mulpier = -0.02 * np.zeros((1, n_relaxed))
 heuristic_solver = HeuristicBySolver(model, gap = 0.01, time_limit = 300)
 
-# SurrogateLagrangianRelaxation 表示代理拉格朗日松弛法, LagrangianRelaxation 表示普通拉格朗日松弛法
-lr = LagrangRelax(model, relaxed_constrs, mulpier)
+# SurrogateLagrangRelax 表示代理拉格朗日松弛法, LagrangRelax 表示普通拉格朗日松弛法, LevLagrangRelax 表示水平拉格朗日松弛法
+
+#lr = LagrangRelax(model, relaxed_constrs, mulpier)
+#lr.bulid_relaxed_duality(lr)
+'''
+lr = SurrogateLagrangRelax(model, relaxed_constrs, mulpier, r = 0.05, big_m = 30)
 lr.bulid_relaxed_duality(lr)
 
-#lr = SurrogateLagrangRelax(model, relaxed_constrs, mulpier, r = 0.8, big_m = 1.2)
-#lr.bulid_relaxed_duality(lr)
-
-max_iter_times = 30
+max_iter_times = 2
 
 for k in range(max_iter_times):
     lr.relaxed_prob.reset_relaxed_objective(mulpier)   # 更新松弛问题目标函数
@@ -53,10 +55,31 @@ for k in range(max_iter_times):
         break
 
     subgrad = lr.duality_prob.get_subgrad(relaxed_expr)  # 计算次梯度
-    lr.duality_prob.get_step_size(k, 0.8, relaxed_obj_values, heuristic_solver)   # 计算次梯度步长
+    lr.duality_prob.get_step_size(k, relaxed_obj_values, heuristic_solver)   # 计算次梯度步长
     mulpier = lr.duality_prob.update_mulpier()                     # 更新乘子
 
     lr.print_status(k)  
     lr.save_kpi()
+'''
 
-lr.plot_kpi()
+lr = LevLagrangRelax(model, relaxed_constrs, mulpier, R = 10**4)
+lr.bulid_relaxed_duality(lr)
+
+max_iter_times = 10
+
+for k in range(max_iter_times):
+    lr.relaxed_prob.reset_relaxed_objective(mulpier)   # 更新松弛问题目标函数
+    lr.relaxed_prob.optimize()                         # 求解松弛问题
+    relaxed_expr = lr.relaxed_prob.get_relaxed_expr()    # 输出松弛约束表达式
+    relaxed_obj_values = lr.relaxed_prob.get_objective_values()  # 输出松弛问题的目标函数
+    
+    lr.relaxed_prob.write_model(k)
+    if lr.is_feasible():
+        break
+
+    subgrad = lr.duality_prob.get_subgrad(relaxed_expr)  # 计算次梯度
+    lr.duality_prob.evaluate_objective(relaxed_obj_values, k)
+    lr.duality_prob.is_descent(k)
+    lr.duality_prob.get_step_size()
+    mulpier = lr.duality_prob.update_mulpier()
+    lr.duality_prob.update_path()
